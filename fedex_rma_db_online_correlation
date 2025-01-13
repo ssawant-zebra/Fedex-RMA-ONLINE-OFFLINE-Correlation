@@ -1,0 +1,241 @@
+ create or replace TEMP table `site_data` as ( select  distinct serial_number,master_id,slot_date,site_name,from
+(Select serial_number, master_id,slot_date,site_name,
+ROW_NUMBER() OVER(PARTITION BY serial_number, slot_date ORDER BY site_name) AS first_created
+-- FROM `gms-ds-algorithms-sb.looker_data_modelling_eu.serial_number_master_id_mapping`
+from `viq-st-eu-p.viq_operation.t_device_store_carry_forward_history`
+ where slot_date between "2024-01-01" and  "2024-01-31"  and master_id=96487 
+ )where first_created = 1);
+
+-- Update monthly data
+-- Data from SQl DB aggregated by Hemakar for Sept2024
+create or replace TEMP table `data1` as ( 
+select *,macAddress as macAddress_final,round((cnt_time*10)/60,0) as hours from (
+select *,rank() over (partition by cluster_id,site_id,zone,zoneId,macAddress,dt order by cnt_time Desc) as rank from (
+select cluster_id,site_id,zone,zoneId,macAddress,sensorStatus,errors,
+substr(timestamp , 1,8) as dt,sensorMode,count(hrs) as cnt_time from (
+select * ,substr(timestamp , 10,2) as hrs,left(zoneid,4) as zone from 
+-- `dmsanlytc-cssanlytc-eu-d.Test_data_PFW.fedex_data_sep_data_updated`
+`dmsanlytc-cssanlytc-eu-d.Test_data_PFW.fedex_data_dec_data`
+-- where macAddress in
+--  ("78:b8:d6:f6:59:0c",
+-- "78:b8:d6:f8:8d:bd",
+-- "78:b8:d6:f8:1e:a4",
+-- "78:b8:d6:f6:57:aa",
+-- "78:b8:d6:f8:8d:d8",
+-- "78:b8:d6:f6:5a:5c",
+-- "78:b8:d6:f8:8d:96",
+-- "78:b8:d6:f6:59:81",
+-- "78:b8:d6:f8:8d:93",
+-- "78:b8:d6:f1:82:0d",
+-- "78:b8:d6:f8:8d:fc"
+-- )
+-- List of TMUS not found in db 
+-- where macAddress in (
+-- "78:b8:d6:f8:35:65",
+-- "78:b8:d6:f8:c8:c7",
+-- "78:b8:d6:f8:1f:10",
+-- "78:b8:d6:f8:c4:6e",
+-- "78:b8:d6:f7:eb:60",
+-- "78:b8:d6:f8:37:39",
+-- "78:b8:d6:f7:eb:cf",
+-- "78:b8:d6:f7:e8:ab",
+-- "78:b8:d6:f8:33:eb",
+-- "78:b8:d6:f7:ea:0d",
+-- "78:b8:d6:f7:ec:8c",
+-- "78:b8:d6:f7:ed:3a",
+-- "78:b8:d6:f7:e9:5f",
+-- "78:b8:d6:f6:59:0c",
+-- "94:fb:29:2a:92:6d",
+-- "78:b8:d6:f7:e9:2f",
+-- "78:b8:d6:f8:34:5d",
+-- "78:b8:d6:f6:45:43",
+-- "94:fb:29:2a:91:74",
+-- "78:b8:d6:f7:ed:28",
+-- "78:b8:d6:f1:1b:81",
+-- "78:b8:d6:f7:eb:ff",
+-- "78:b8:d6:f1:1a:a3",
+-- "78:b8:d6:f8:8d:96",
+-- "78:b8:d6:f8:0f:86",
+-- "78:b8:d6:f8:20:66",
+-- "78:b8:d6:f7:ea:d3",
+-- "78:b8:d6:f6:5a:44",
+-- "78:b8:d6:f8:11:bd",
+-- "78:b8:d6:3a:8d:4a",
+-- "78:b8:d6:f8:23:54",
+-- "78:b8:d6:f8:0f:0b",
+-- "78:b8:d6:f8:10:94",
+-- "78:b8:d6:f8:1f:16",
+-- "78:b8:d6:f8:10:5e",
+-- "78:b8:d6:f7:ed:16",
+-- "78:b8:d6:f8:23:18",
+-- "78:b8:d6:f8:10:82",
+-- "78:b8:d6:f8:0e:d2"
+-- )
+order by timestamp)
+group by cluster_id,site_id,zone,zoneId,macAddress,dt,sensorMode,sensorStatus,errors )) where rank = 1
+order by cluster_id,site_id,zone,zoneId,macAddress,dt);
+
+-- Fedex daily rept for 30Sept204
+create or replace TEMP table `data2` as ( 
+select *,
+case when macAddress_new is NULL then macAddress
+else macAddress_new
+ END AS macAddress_final
+from(
+select Repair_no,Serial_no_In,Serial_no_Out,macAddress,WIFI,report,WIFI_IN,Ship_Date,
+case when macAddress = WIFI then WIFI
+when macAddress = "1:::::" and WIFI <> "#N/A" then  WIFI
+when WIFI = "#N/A" and macAddress <> "N/A" then macAddress
+when WIFI <> macAddress  then macAddress
+ END AS macAddress_new
+from
+-- `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_30092024_1`)
+`dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_31122024`)
+);
+
+-- left Join by macAddress fedex data and daily data
+
+-- get distinct rows from hemakar data `data1' for current date
+
+create or replace TEMP table `data1_status` as ( 
+  select * from(
+   select  cluster_id,site_id,zone,zoneId,sensorStatus,	errors,sensorMode,macAddress_final,dt,hours,
+   rank() over (partition by cluster_id,site_id,zone,zoneId,macAddress_final order by dt Desc) as recent_record
+  from data1
+  -- where macAddress_final in ("94:fb:29:2a:a5:27","78:b8:d6:3a:8d:47","78:b8:d6:f3:4d:b9","94:fb:29:2a:a6:b0")
+  order by macAddress_final,dt)where recent_record=1 order by macAddress_final,dt);
+
+-- create or replace TEMP table `data1_distinct` as ( 
+--   select  cluster_id,site_id,zone,zoneId,sensorStatus,	errors,sensorMode,macAddress_final,hours,dt
+--   from data1
+--   where dt = '20240930');
+
+-- This table will show to which door the new serial_no_out are installed and their current day online/offline status
+-- This table will also contain macaddress that are still not installed at the door , i.e. 
+-- serial_no_out present in fedex ground_daily report are not present in SQL DB.
+
+-- create or replace table `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status` 
+
+create or replace TEMP table `fedex_ground_daily_report_status_a` as ( 
+select b.Repair_no,b.Serial_no_In,b.Serial_no_Out,b.macAddress_final,b.Ship_Date,b.report,b.WIFI_IN,a.cluster_id,
+a.site_id,a.zone,a.zoneId,a.sensorStatus,	a.errors,a.sensorMode,a.hours,a.dt as last_recorded_date_Serial_no_Out
+from data2 as b left join data1_status as a
+on a.macAddress_final = b.macAddress_final
+order by  cluster_id,site_id,zone,zoneId,macAddress_final,dt);
+
+create or replace TEMP table `fedex_ground_daily_report_status_b` as ( 
+select b.*,
+c.cluster_id as cluster_id_serial_no_in,c.site_id as site_id_serial_no_in,c.zone as zone_serial_no_in,
+c.zoneId as zoneId_serial_no_in,c.dt as last_recorded_date_Serial_no_IN,c.sensorMode as sensorMode_Serial_no_IN ,c.hours as hours_Serial_no_IN
+from fedex_ground_daily_report_status_a as b left join data1_status as c
+on b.WIFI_IN = c.macAddress_final
+order by  cluster_id,site_id,zone,zoneId,macAddress_final,last_recorded_date_Serial_no_Out);
+
+
+create or replace TEMP table `fedex_ground_daily_report_status` as (
+  select * from `fedex_ground_daily_report_status_b` 
+order by  cluster_id,site_id,zone,zoneId,macAddress_final,last_recorded_date_Serial_no_Out);
+
+--!!!!!!!!!!!! For first run, comment out for subsequent run
+
+-- create or replace  table `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status` as (
+--   select * from `fedex_ground_daily_report_status` 
+-- order by  cluster_id,site_id,zone,zoneId,macAddress_final,last_recorded_date_Serial_no_Out);
+
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+-- For subsequent runs
+
+create or replace table `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status` as (
+select *
+FROM `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status`
+UNION ALL
+select *
+FROM `fedex_ground_daily_report_status` );
+
+-- Get daily data for macaddress that are installed and present in SQL DB
+-- Join by macAddress
+create or replace TEMP table `data3` as ( 
+select b.Repair_no,b.Serial_no_In,b.Serial_no_Out,b.macAddress_final,b.report,a.cluster_id,
+a.site_id,a.zone,a.zoneId,a.sensorStatus,	a.errors,a.sensorMode,a.hours,a.dt
+from data1 as a left join data2 as b
+on a.macAddress_final = b.macAddress_final
+order by  cluster_id,site_id,zone,zoneId,macAddress_final,dt);
+
+
+create or replace TEMP table `fedex_ground_daily_report_status_monthly_tracker` as (
+  select * from data3
+  where Repair_no is not null
+);
+
+
+-- For first run, comment out for subsequent run
+-- create or replace table `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status_monthly_tracker` as (
+--   select * from `fedex_ground_daily_report_status_monthly_tracker`
+-- );
+
+
+-- For subsequent runs
+
+create or replace table `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status_monthly_tracker`  as (
+select *
+FROM `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status_monthly_tracker` 
+UNION ALL
+select *
+FROM `fedex_ground_daily_report_status_monthly_tracker` );
+
+
+
+-- !!!!!REPEAT REPAIRS
+
+-- SELECT * FROM `dmsanlytc-cssanlytc-eu-d._scriptdba2380581e34b77da7bdf2b6c35b2155efedf41.fedex_ground_daily_report_status` 
+-- where  Serial_no_Out = 23244521400232
+ create or replace TEMP table `site_data` as ( select  distinct serial_number,master_id,slot_date,site_name,from
+(Select serial_number, master_id,slot_date,site_name,
+ROW_NUMBER() OVER(PARTITION BY serial_number, slot_date ORDER BY site_name) AS first_created
+-- FROM `gms-ds-algorithms-sb.looker_data_modelling_eu.serial_number_master_id_mapping`
+from `viq-st-eu-p.viq_operation.t_device_store_carry_forward_history`
+ where slot_date between "2024-01-01" and  "2024-01-31"  and master_id=96487 
+ )where first_created = 1);
+
+create or replace TEMP table `repeat_repair1` as ( 
+SELECT distinct Serial_no_Out FROM `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status`
+ WHERE
+cast(Serial_no_Out as STRING) IN (SELECT DISTINCT Serial_no_IN FROM `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status`)
+order by Serial_no_Out);
+
+create or replace TEMP table `repeat_repair_in` as ( 
+select report,repair_no,Ship_Date,Serial_no,zoneID,repeat_repairs from(
+SELECT  report,repair_no,Ship_Date,Serial_no_In,Serial_no_Out,zoneId_serial_no_in as zoneID,
+CONCAT(Serial_no_In,"-->",Serial_no_Out) as repeat_repairs,Serial_no_In as Serial_no
+FROM `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status`
+ WHERE
+Serial_no_In IN (SELECT DISTINCT cast(Serial_no_Out as STRING) FROM repeat_repair1)
+order by Serial_no_In)order by Serial_no);
+
+create or replace TEMP table `repeat_repair_out` as ( 
+  select report,repair_no,Ship_Date,Serial_no,zoneID,repeat_repairs from(
+SELECT  report,repair_no,Ship_Date ,Serial_no_In,Serial_no_Out,zoneID,CONCAT(Serial_no_In,"-->",Serial_no_Out) as repeat_repairs,
+cast(Serial_no_Out as STRING)  as Serial_no
+FROM `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_status`
+ WHERE
+cast(Serial_no_Out as STRING) IN (SELECT DISTINCT cast(Serial_no_Out as STRING) FROM repeat_repair1)
+order by Serial_no_Out)order by Serial_no);
+
+create or replace TEMP table `final_repeat_repairs` as (
+select *
+FROM `repeat_repair_out`
+UNION ALL
+select *
+FROM `repeat_repair_in`);
+
+create or replace table `dmsanlytc-cssanlytc-eu-d.TEST_DATA_EU_SS.fedex_ground_daily_report_repeat_repairs`
+as (select distinct repair_no,Ship_Date,Serial_no,zoneID,repeat_repairs
+from `final_repeat_repairs` order by Serial_no,ship_date);
+-- check for offline for entire month
+-- select * from (
+-- SELECT Serial_no_Out,sensorMode,zoneId,macAddress_final,count(dt) as cnt FROM `dmsanlytc-cssanlytc-eu-d._scriptdba2380581e34b77da7bdf2b6c35b2155efedf41.fedex_ground_daily_report_status_monthly_tracker` 
+-- where sensorMode = "ONLINE" and Serial_no_Out = 23244521400232
+-- group by Serial_no_Out,sensorMode,zoneId,macAddress_final)
+-- where cnt>=20
+-- order by Serial_no_Out,sensorMode,zoneId,macAddress_final
